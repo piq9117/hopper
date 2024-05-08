@@ -14,10 +14,19 @@ import qualified Hopper.Thrift.Hopper.Server
 import qualified Hopper.Thrift.Hopper.Types
 import Prelude hiding (State)
 
-type Node = ()
+data Node = Node 
+  { label :: Maybe Text 
+  }
+  deriving stock Show
 
-newtype Task = Task {taskToByteString :: ByteString}
+instance Hopper.Scheduler.Label Node where
+  label node = node.label
+
+data Task = Task {taskToByteString :: ByteString, affinity :: Maybe Text}
   deriving stock (Show)
+
+instance Hopper.Scheduler.Affinity Task where
+  affinity task = task.affinity
 
 type instance Hopper.Scheduler.TaskId Task = ByteString
 
@@ -25,9 +34,10 @@ type instance Hopper.Scheduler.TaskResult Task = ByteString
 
 run ::
   Hopper.Distributed.Scheduler.Trace.Tracer ->
+  Maybe Text ->
   Hopper.Scheduler.Scheduler Node Task ->
   IO ()
-run tracer' scheduler =
+run tracer' label scheduler =
   Control.Concurrent.Async.race_ runScheduler runServer
   where
     runScheduler =
@@ -44,20 +54,21 @@ run tracer' scheduler =
                     tracer'
             Hopper.Thrift.Hopper.Server.scheduler_mkServer
               Hopper.Thrift.Hopper.Server.Scheduler
-                { requestNextTask = \_context -> requestNextTask tracer scheduler,
+                { requestNextTask = \_context -> requestNextTask tracer label scheduler,
                   heartbeat = \_context -> heartbeat tracer scheduler
                 }
         )
 
 requestNextTask ::
   Hopper.Distributed.Scheduler.Trace.Tracer ->
+  Maybe Text ->
   Hopper.Scheduler.Scheduler Node Task ->
   Hopper.Thrift.Hopper.Types.RequestNextTaskRequest ->
   IO Hopper.Thrift.Hopper.Types.RequestNextTaskResponse
-requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} scheduler _request = do
+requestNextTask Hopper.Distributed.Scheduler.Trace.Tracer {..} label scheduler _request = do
   withSpan Hopper.Distributed.Scheduler.Trace.RequestNextTaskSpan $ \span -> do
     task <-
-      Hopper.Scheduler.requestTask scheduler () (Just 1)
+      Hopper.Scheduler.requestTask scheduler (Node {label}) (Just 1)
     case task of
       Just task -> do
         tagSpan

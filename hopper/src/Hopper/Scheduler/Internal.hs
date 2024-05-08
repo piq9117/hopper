@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# OPTIONS_GHC -O2 -ddump-prep -ddump-to-file -dsuppress-all #-}
 
 module Hopper.Scheduler.Internal
@@ -12,7 +13,10 @@ module Hopper.Scheduler.Internal
     Inputs (..),
     Scheduler (..),
     Driver (..),
+    Affinity(..),
+    Label(..),
     scheduler,
+    mkInputs
   )
 where
 
@@ -28,8 +32,12 @@ type family TaskResult task
 
 data Task task = Task
   { id :: TaskId task,
-    task :: task
+    task :: task,
+    taskAffinity :: Maybe Text
   }
+
+instance Affinity (Task task) where
+  affinity task = task.taskAffinity
 
 deriving instance (Show task, Show (TaskId task)) => Show (Task task)
 
@@ -63,6 +71,24 @@ data Inputs node task = Inputs
     taskToSchedule :: STM (Task task),
     -- | Signal that a task was lost due to node becoming unavailable.
     lostTask :: [Attempt node task] -> Reason -> STM ()
+  }
+
+class Label node where
+  label :: node -> Maybe Text
+
+class Affinity task where
+  affinity :: task -> Maybe Text
+
+mkInputs :: 
+  (Label node, Affinity task) =>
+  STM Epoch -> 
+  STM (Task task) -> 
+  ([Attempt node task] -> Reason -> STM ()) ->  
+  Inputs node task
+mkInputs epoch taskToSchedule lostTask = Inputs 
+  { epoch,
+    taskToSchedule,
+    lostTask
   }
 
 data State node task = State

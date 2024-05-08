@@ -13,9 +13,13 @@ module Hopper.Scheduler
     Scheduler.TaskId,
     Scheduler.TaskResult,
     TaskExecutionError (..),
+    Scheduler.Reason,
+    Scheduler.Affinity(..),
+    Scheduler.Label(..),
   )
 where
 
+import Debug.Trace qualified as Debug 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Hopper.Scheduler.Internal qualified as Scheduler
@@ -50,7 +54,9 @@ withScheduler ::
     Show task,
     Show node,
     Show (Scheduler.TaskId task),
-    Show (Scheduler.TaskResult task)
+    Show (Scheduler.TaskResult task),
+    Scheduler.Affinity task, 
+    Scheduler.Label node
   ) =>
   -- | A way for the scheduler to report a task has been lost.
   ([Scheduler.Task task] -> Scheduler.Reason -> IO ()) ->
@@ -68,14 +74,10 @@ withScheduler reportLostTasks reportTaskResult action =
 
     scheduler <-
       atomically $
-        Scheduler.scheduler
-          Scheduler.Inputs
-            { epoch,
-              taskToSchedule =
-                takeTMVar taskQueue,
-              lostTask = \attemptedTasks reason ->
-                putTMVar lostTaskQueue ((fmap (.task) attemptedTasks), reason)
-            }
+        Scheduler.scheduler $
+          Scheduler.mkInputs epoch (takeTMVar taskQueue) (\attemptedTasks reason -> 
+            putTMVar lostTaskQueue ((fmap (.task) attemptedTasks, reason))
+          )
 
     let lostTaskLoop = forever $ do
           (tasks, reason) <- atomically $ takeTMVar lostTaskQueue
@@ -94,8 +96,12 @@ withScheduler reportLostTasks reportTaskResult action =
               putTMVar taskQueue task,
             reportTaskStatus = \taskStatus ->
               scheduler.reportTaskStatus taskStatus,
-            requestTask = \node ->
-              fmap (.task) (scheduler.schedule node)
+            requestTask = \node -> do
+              task <- readTMVar taskQueue
+              Debug.traceShow (Scheduler.affinity task, Scheduler.label node) (pure ())
+              if Scheduler.affinity task == Scheduler.label node
+              then fmap (.task) (scheduler.schedule node)
+              else putTMVar taskQueue task >> pure task
           }
 
 -- | Blocking action running until shutdown is being requested.
@@ -113,12 +119,12 @@ shutdown :: Scheduler node task -> IO ()
 shutdown runtime = atomically runtime.requestShutdown
 
 -- | Schedules a task. If no timeout is specified this operation will block indenfinitely.
-scheduleTask :: Scheduler node task -> Scheduler.TaskId task -> task -> Maybe Timeout -> IO Bool
+scheduleTask :: Scheduler.Affinity task => Scheduler node task -> Scheduler.TaskId task -> task -> Maybe Timeout -> IO Bool
 scheduleTask runtime id task timeout = do
   result <-
     withTimeout
       runtime
-      (runtime.scheduleTask (Scheduler.Task {id, task}))
+      (runtime.scheduleTask (Scheduler.Task {id, task, taskAffinity = Scheduler.affinity task}))
       timeout
   pure (isJust result)
 

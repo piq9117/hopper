@@ -22,10 +22,19 @@ main = do
         print (taskId, task)
         pure "done"
     else do
-      let handleLostTask task reason =
-            print ("Lost" :: Text, task, reason)
+      let 
+        handleLostTask :: 
+          [Hopper.Scheduler.Task Hopper.Distributed.Scheduler.Task] ->
+          Hopper.Scheduler.Reason -> 
+          IO ()
+        handleLostTask task reason = 
+           print ("Lost" :: Text, task, reason)
 
-          handleTaskResult taskId taskResult =
+      let 
+        handleTaskResult :: ByteString ->
+          Either Hopper.Scheduler.TaskExecutionError ByteString ->
+          IO ()
+        handleTaskResult taskId taskResult = 
             print ("coolio" :: Text, taskId, taskResult)
 
       Hopper.Scheduler.withScheduler handleLostTask handleTaskResult $ \scheduler -> do
@@ -45,9 +54,9 @@ main = do
                         Hopper.Scheduler.scheduleTask
                           scheduler
                           id
-                          (Hopper.Distributed.Scheduler.Task "cool task")
+                          (Hopper.Distributed.Scheduler.Task "cool task" (Just "node 2"))
                           Nothing
                   )
               <*> ( Concurrently $
-                      Hopper.Distributed.Scheduler.run nullTracer scheduler
+                      Hopper.Distributed.Scheduler.run nullTracer (Just "node 1") scheduler
                   )

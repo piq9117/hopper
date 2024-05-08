@@ -36,7 +36,7 @@ run schedulerHost schedulerPort executeTask = do
             client
             (fmap fromIntegral requestNextTaskResponse.requestNextTaskResponse_timeout_in_seconds)
             taskId
-            (executeTask taskId (Task task))
+            (executeTask taskId (Task task (Just "node 1")))
 
         void $
           call
